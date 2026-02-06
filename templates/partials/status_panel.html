@@ -1,0 +1,23 @@
+<section id="status-panel" class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 relative overflow-hidden">
+    <div id="status-glow" class="absolute top-0 left-0 w-1 h-full bg-slate-500"></div>
+
+    <div class="flex justify-between items-start mb-4 gap-4">
+        <div>
+            <span id="status-badge" class="px-3 py-1 rounded-full text-xs font-bold bg-slate-600 text-white tracking-wide">IDLE</span>
+            <h2 id="current-filename" class="text-xl font-mono mt-2 text-white truncate max-w-xl">Kein aktiver Job</h2>
+            <p id="current-mode" class="text-xs text-slate-400 mt-1 uppercase tracking-wider">Warte auf Input...</p>
+        </div>
+        <button onclick="cancelJob()" id="cancel-btn" disabled class="bg-red-500/10 text-red-500 hover:bg-red-600 hover:text-white border border-red-500/50 px-4 py-2 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            <i class="fa-solid fa-power-off mr-2"></i>ABBRECHEN
+        </button>
+    </div>
+
+    <div class="w-full bg-slate-900 rounded-full h-6 mb-2 overflow-hidden border border-slate-700 relative">
+        <div id="progress-bar" class="h-full bg-cyan-600 transition-all duration-500 flex items-center justify-end pr-2 text-xs font-bold text-white" style="width: 0%">0%</div>
+    </div>
+
+    <div class="flex justify-between text-sm text-slate-400 font-mono">
+        <span id="status-message">System bereit.</span>
+        <span id="status-percent">--</span>
+    </div>
+</section>

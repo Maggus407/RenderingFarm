@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WG Renderfarm UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <style>
+        .progress-striped {
+            background-image: linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent);
+            background-size: 1rem 1rem;
+            animation: progress-bar-stripes 1s linear infinite;
+        }
+        @keyframes progress-bar-stripes {
+            0% { background-position: 1rem 0; }
+            100% { background-position: 0 0; }
+        }
+        .queue-drag-ghost {
+            opacity: 0.35;
+        }
+        .queue-drag-chosen {
+            background: rgba(15, 23, 42, 0.7);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 font-sans min-h-screen p-4 md:p-8">
+<div class="max-w-[1800px] mx-auto space-y-8">
+    {% include "partials/header.html" %}
+
+    <div class="grid grid-cols-1 xl:grid-cols-5 gap-8">
+        <div class="xl:col-span-3 space-y-8">
+            {% include "partials/status_panel.html" %}
+            {% include "partials/new_job.html" %}
+        </div>
+
+        {% include "partials/queue.html" %}
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+        {% include "partials/finished_jobs.html" %}
+        {% include "partials/failed_jobs.html" %}
+    </div>
+</div>
+
+<script>
+    const els = {
+        statusBadge: document.getElementById('status-badge'),
+        statusGlow: document.getElementById('status-glow'),
+        filename: document.getElementById('current-filename'),
+        mode: document.getElementById('current-mode'),
+        progressBar: document.getElementById('progress-bar'),
+        msg: document.getElementById('status-message'),
+        percent: document.getElementById('status-percent'),
+        cancelBtn: document.getElementById('cancel-btn'),
+        queueList: document.getElementById('queue-list'),
+        queueCount: document.getElementById('queue-count'),
+        finishedList: document.getElementById('finished-list'),
+        failedList: document.getElementById('failed-list'),
+        failedPrev: document.getElementById('failed-prev'),
+        failedNext: document.getElementById('failed-next'),
+        failedPageInfo: document.getElementById('failed-page-info'),
+        dropZone: document.getElementById('drop-zone'),
+        fileInput: document.getElementById('file-input'),
+        uploadStatus: document.getElementById('upload-status'),
+        queueSubmit: document.getElementById('queue-submit'),
+        turboUseSimplify: document.getElementById('turbo-use-simplify'),
+        turboSimplifySubdivisionRender: document.getElementById('turbo-simplify-subdivision-render'),
+        turboUseAdaptiveSampling: document.getElementById('turbo-use-adaptive-sampling'),
+        turboSamples: document.getElementById('turbo-samples'),
+        turboAdaptiveThreshold: document.getElementById('turbo-adaptive-threshold'),
+        turboUseDenoising: document.getElementById('turbo-use-denoising'),
+        turboDenoiser: document.getElementById('turbo-denoiser'),
+        turboMaxBounces: document.getElementById('turbo-max-bounces'),
+        turboDiffuseBounces: document.getElementById('turbo-diffuse-bounces'),
+        turboGlossyBounces: document.getElementById('turbo-glossy-bounces'),
+        turboTransmissionBounces: document.getElementById('turbo-transmission-bounces'),
+        turboTransparentMaxBounces: document.getElementById('turbo-transparent-max-bounces'),
+        turboVolumeBounces: document.getElementById('turbo-volume-bounces'),
+        turboClampDirect: document.getElementById('turbo-clamp-direct'),
+        turboClampIndirect: document.getElementById('turbo-clamp-indirect'),
+        turboFilterGlossy: document.getElementById('turbo-filter-glossy'),
+        turboCausticsReflective: document.getElementById('turbo-caustics-reflective'),
+        turboCausticsRefractive: document.getElementById('turbo-caustics-refractive'),
+        turboTileSize: document.getElementById('turbo-tile-size'),
+        turboUsePersistentData: document.getElementById('turbo-use-persistent-data'),
+        turboUseHiprt: document.getElementById('turbo-use-hiprt'),
+        turboSettingsStatus: document.getElementById('turbo-settings-status'),
+        connectionStatus: document.getElementById('connection-status')
+    };
+
+    const failedPagination = {
+        page: 1,
+        pageSize: 10,
+        totalPages: 1
+    };
+
+    let lastFinishedSig = '';
+    let lastFailedSig = '';
+    let lastFullRefresh = 0;
+    let lastRenderStatus = null;
+    let pollIntervalMs = 1500;
+    let pollTimer = null;
+    let queueSortable = null;
+    let isQueueDragging = false;
+    let stagedFile = null;
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }
+
+    function formatDate(isoString) {
+        if (!isoString) return '-';
+        const d = new Date(isoString);
+        if (Number.isNaN(d.getTime())) return '-';
+        return d.toLocaleString('de-DE');
+    }
+
+    function formatDateShort(isoString) {
+        if (!isoString) return '-';
+        const d = new Date(isoString);
+        if (Number.isNaN(d.getTime())) return '-';
+        return `${d.toLocaleDateString('de-DE')} ${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    function modeBadge(mode) {
+        if (mode === 'ARTIST') {
+            return '<span class="text-purple-400"><i class="fa-solid fa-palette mr-1"></i>Artist</span>';
+        }
+        return '<span class="text-cyan-400"><i class="fa-solid fa-rocket mr-1"></i>Turbo</span>';
+    }
+
+    function stateBadge(state) {
+        if (state === 'QUEUED') {
+            return '<span class="text-emerald-400"><i class="fa-solid fa-play mr-1"></i>Queued</span>';
+        }
+        return '<span class="text-amber-400"><i class="fa-regular fa-clock mr-1"></i>Pending</span>';
+    }
+
+    function formatDuration(startIso, endIso) {
+        if (!startIso || !endIso) return '-';
+        const start = new Date(startIso);
+        const end = new Date(endIso);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '-';
+        let seconds = Math.max(0, Math.round((end - start) / 1000));
+        const hours = Math.floor(seconds / 3600);
+        seconds -= hours * 3600;
+        const minutes = Math.floor(seconds / 60);
+        seconds -= minutes * 60;
+
+        if (hours > 0) {
+            return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+        }
+        if (minutes > 0) {
+            return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+        }
+        return `${seconds}s`;
+    }
+
+    function formatTurboSummary(job) {
+        if (!job || job.mode !== 'TURBO' || !job.turbo_settings) return '-';
+        const settings = job.turbo_settings;
+        const useDenoising = Boolean(settings.use_denoising);
+        const denoiser = useDenoising && settings.denoiser ? String(settings.denoiser) : '';
+        const hiprt = job.hiprt_used ? 'HIP-RT an' : 'HIP-RT aus';
+        const tile = settings.tile_size ? `Tile ${settings.tile_size}` : 'Tile -';
+        const samples = settings.samples ? `Samples ${settings.samples}` : 'Samples -';
+        return useDenoising
+            ? `${samples} | ${denoiser} | ${tile} | ${hiprt}`
+            : `${samples} | ${tile} | ${hiprt}`;
+    }
+
+    function formatSampleCount(job) {
+        if (!job || !job.turbo_settings) return '-';
+        const samples = Number(job.turbo_settings.samples);
+        return Number.isFinite(samples) ? String(samples) : '-';
+    }
+
+    function parseDurationSeconds(rawValue) {
+        if (!rawValue) return null;
+        const raw = String(rawValue).trim().replace(',', '.');
+        if (!raw) return null;
+        const parts = raw.split(':');
+        if (parts.length < 1 || parts.length > 3) return null;
+
+        let seconds = 0;
+        const last = parts.pop();
+        const lastSeconds = Number.parseFloat(last);
+        if (!Number.isFinite(lastSeconds)) return null;
+        seconds += lastSeconds;
+
+        if (parts.length) {
+            const minutes = Number.parseInt(parts.pop(), 10);
+            if (!Number.isFinite(minutes)) return null;
+            seconds += minutes * 60;
+        }
+        if (parts.length) {
+            const hours = Number.parseInt(parts.pop(), 10);
+            if (!Number.isFinite(hours)) return null;
+            seconds += hours * 3600;
+        }
+        return Math.max(0, seconds);
+    }
+
+    function computeTimeProgress(job) {
+        if (!job || job.status !== 'RENDERING') return null;
+        if (!job.started_at || !job.remaining) return null;
+        const remainingSec = parseDurationSeconds(job.remaining);
+        if (remainingSec === null) return null;
+        const started = new Date(job.started_at);
+        if (Number.isNaN(started.getTime())) return null;
+        const elapsedSec = (Date.now() - started.getTime()) / 1000;
+        if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return null;
+        const total = elapsedSec + remainingSec;
+        if (!Number.isFinite(total) || total <= 0) return null;
+        return Math.max(0, Math.min(100, Math.round((elapsedSec / total) * 100)));
+    }
+
+    function encodePath(path) {
+        return path.split('/').map(encodeURIComponent).join('/');
+    }
+
+    function syncDenoiserUI() {
+        const enabled = els.turboUseDenoising.checked;
+        els.turboDenoiser.disabled = !enabled;
+        els.turboDenoiser.classList.toggle('opacity-50', !enabled);
+    }
+
+    function applyTurboSettingsToForm(settings) {
+        els.turboUseSimplify.checked = Boolean(settings.use_simplify);
+        els.turboSimplifySubdivisionRender.value = settings.simplify_subdivision_render;
+        els.turboUseAdaptiveSampling.checked = Boolean(settings.use_adaptive_sampling);
+        els.turboSamples.value = settings.samples;
+        els.turboAdaptiveThreshold.value = settings.adaptive_threshold;
+        els.turboUseDenoising.checked = Boolean(settings.use_denoising);
+        els.turboDenoiser.value = settings.denoiser || 'OPENIMAGEDENOISE';
+        els.turboMaxBounces.value = settings.max_bounces;
+        els.turboDiffuseBounces.value = settings.diffuse_bounces;
+        els.turboGlossyBounces.value = settings.glossy_bounces;
+        els.turboTransmissionBounces.value = settings.transmission_bounces;
+        els.turboTransparentMaxBounces.value = settings.transparent_max_bounces;
+        els.turboVolumeBounces.value = settings.volume_bounces;
+        els.turboClampDirect.value = settings.clamp_direct;
+        els.turboClampIndirect.value = settings.clamp_indirect;
+        els.turboFilterGlossy.value = settings.filter_glossy;
+        els.turboCausticsReflective.checked = Boolean(settings.caustics_reflective);
+        els.turboCausticsRefractive.checked = Boolean(settings.caustics_refractive);
+        els.turboTileSize.value = settings.tile_size;
+        els.turboUsePersistentData.checked = Boolean(settings.use_persistent_data);
+        els.turboUseHiprt.checked = Boolean(settings.use_hiprt);
+        syncDenoiserUI();
+    }
+
+    async function loadTurboSettings() {
+        try {
+            const res = await fetch('/config/turbo');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Konnte Turbo-Settings nicht laden');
+            applyTurboSettingsToForm(data.settings || {});
+        } catch (err) {
+            console.error(err);
+            els.turboSettingsStatus.innerText = 'Fehler beim Laden';
+            els.turboSettingsStatus.className = 'text-xs text-red-400';
+        }
+    }
+
+    async function saveTurboSettings() {
+        const settings = {
+            use_simplify: els.turboUseSimplify.checked,
+            simplify_subdivision_render: Number(els.turboSimplifySubdivisionRender.value),
+            use_adaptive_sampling: els.turboUseAdaptiveSampling.checked,
+            samples: Number(els.turboSamples.value),
+            adaptive_threshold: Number(els.turboAdaptiveThreshold.value),
+            use_denoising: els.turboUseDenoising.checked,
+            denoiser: els.turboDenoiser.value,
+            max_bounces: Number(els.turboMaxBounces.value),
+            diffuse_bounces: Number(els.turboDiffuseBounces.value),
+            glossy_bounces: Number(els.turboGlossyBounces.value),
+            transmission_bounces: Number(els.turboTransmissionBounces.value),
+            transparent_max_bounces: Number(els.turboTransparentMaxBounces.value),
+            volume_bounces: Number(els.turboVolumeBounces.value),
+            clamp_direct: Number(els.turboClampDirect.value),
+            clamp_indirect: Number(els.turboClampIndirect.value),
+            filter_glossy: Number(els.turboFilterGlossy.value),
+            caustics_reflective: els.turboCausticsReflective.checked,
+            caustics_refractive: els.turboCausticsRefractive.checked,
+            tile_size: Number(els.turboTileSize.value),
+            use_persistent_data: els.turboUsePersistentData.checked,
+            use_hiprt: els.turboUseHiprt.checked,
+        };
+
+        els.turboSettingsStatus.innerText = 'Speichere...';
+        els.turboSettingsStatus.className = 'text-xs text-cyan-400';
+        try {
+            const res = await fetch('/config/turbo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ settings }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Speichern fehlgeschlagen');
+            applyTurboSettingsToForm(data.settings || settings);
+            els.turboSettingsStatus.innerText = 'Gespeichert';
+            els.turboSettingsStatus.className = 'text-xs text-green-400';
+        } catch (err) {
+            els.turboSettingsStatus.innerText = err.message || 'Speichern fehlgeschlagen';
+            els.turboSettingsStatus.className = 'text-xs text-red-400';
+        }
+    }
+
+    async function resetTurboSettings() {
+        els.turboSettingsStatus.innerText = 'Setze Defaults...';
+        els.turboSettingsStatus.className = 'text-xs text-cyan-400';
+        try {
+            const res = await fetch('/config/turbo/reset', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Reset fehlgeschlagen');
+            applyTurboSettingsToForm(data.settings || {});
+            els.turboSettingsStatus.innerText = 'Auf Default zurückgesetzt';
+            els.turboSettingsStatus.className = 'text-xs text-green-400';
+        } catch (err) {
+            els.turboSettingsStatus.innerText = err.message || 'Reset fehlgeschlagen';
+            els.turboSettingsStatus.className = 'text-xs text-red-400';
+        }
+    }
+
+    function scheduleNextPoll() {
+        if (pollTimer) {
+            clearTimeout(pollTimer);
+        }
+        pollTimer = setTimeout(updateStatus, pollIntervalMs);
+    }
+
+    async function refreshArchives(force = false) {
+        const now = Date.now();
+        if (!force && now - lastFullRefresh < 10000) return;
+        try {
+            const [finishedRes, failedRes] = await Promise.all([
+                fetch('/jobs/finished'),
+                fetch('/jobs/failed')
+            ]);
+
+            if (!finishedRes.ok || !failedRes.ok) {
+                throw new Error('Archive request failed');
+            }
+
+            const finishedData = await finishedRes.json();
+            const failedData = await failedRes.json();
+
+            renderFinished(finishedData.jobs || []);
+            renderFailed(failedData.jobs || []);
+            lastFullRefresh = now;
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    async function updateStatus() {
+        try {
+            const statusRes = await fetch('/status');
+            if (!statusRes.ok) {
+                throw new Error('API request failed');
+            }
+
+            const statusData = await statusRes.json();
+
+            renderJob(statusData.job || {});
+            renderQueue(statusData.queue || []);
+
+            const currentStatus = (statusData.job || {}).status || 'IDLE';
+            const queueLen = (statusData.queue || []).length;
+            const wasRendering = lastRenderStatus === 'RENDERING';
+            const isRendering = currentStatus === 'RENDERING';
+
+            pollIntervalMs = isRendering || queueLen > 0 ? 1500 : 5000;
+            lastRenderStatus = currentStatus;
+
+            const finishedNow = wasRendering && !isRendering;
+            await refreshArchives(finishedNow);
+
+            els.connectionStatus.innerHTML = '<i class="fa-solid fa-circle text-green-500 mr-1"></i> Verbunden';
+        } catch (err) {
+            console.error(err);
+            els.connectionStatus.innerHTML = '<i class="fa-solid fa-circle text-red-500 mr-1"></i> Offline';
+        } finally {
+            scheduleNextPoll();
+        }
+    }
+
+    function renderJob(job) {
+        let colorClass = 'bg-slate-600';
+        let glowClass = 'bg-slate-500';
+        const isRendering = job.status === 'RENDERING';
+
+        if (job.status === 'RENDERING') {
+            colorClass = 'bg-green-500';
+            glowClass = 'bg-green-500';
+            els.progressBar.classList.add('progress-striped');
+        } else if (job.status === 'ERROR') {
+            colorClass = 'bg-red-500';
+            glowClass = 'bg-red-500';
+            els.progressBar.classList.remove('progress-striped');
+        } else {
+            els.progressBar.classList.remove('progress-striped');
+        }
+
+        els.statusBadge.className = `px-3 py-1 rounded-full text-xs font-bold text-white tracking-wide ${colorClass}`;
+        els.statusBadge.innerText = job.status || 'IDLE';
+        els.statusGlow.className = `absolute top-0 left-0 w-1 h-full ${glowClass}`;
+
+        els.filename.innerText = job.filename || 'Kein aktiver Job';
+        els.mode.innerText = job.filename ? `Modus: ${job.mode || 'TURBO'} | Job: ${job.id || '-'}` : 'Warte auf Input...';
+
+        const timePct = computeTimeProgress(job);
+        const pct = Number.isFinite(timePct) ? timePct : Number(job.progress || 0);
+        const sampleCurrent = Number.isFinite(Number(job.sample_current)) ? Number(job.sample_current) : null;
+        const sampleTotal = Number.isFinite(Number(job.sample_total)) ? Number(job.sample_total) : null;
+        const tileCurrent = Number.isFinite(Number(job.tile_current)) ? Number(job.tile_current) : null;
+        const tileTotal = Number.isFinite(Number(job.tile_total)) ? Number(job.tile_total) : null;
+        const tileLabel = tileCurrent !== null && tileTotal !== null ? `Tiles ${tileCurrent}/${tileTotal}` : '';
+        const sampleLabel = sampleCurrent !== null && sampleTotal !== null ? `Sample ${sampleCurrent}/${sampleTotal}` : '';
+        const statusLabel = [tileLabel, sampleLabel].filter(Boolean).join(' | ');
+        const remainingLabel = job.remaining ? `ETA ${job.remaining}` : '--';
+
+        els.progressBar.style.width = `${pct}%`;
+        els.progressBar.innerText = pct > 5 ? `${pct}%` : '';
+
+        els.msg.innerText = statusLabel || job.message || 'System bereit.';
+        els.percent.innerText = job.filename ? remainingLabel : '--';
+        els.cancelBtn.disabled = !isRendering;
+    }
+
+    function renderQueue(queueItems) {
+        if (isQueueDragging) {
+            return;
+        }
+        els.queueCount.innerText = queueItems.length;
+        els.queueList.innerHTML = '';
+
+        if (!queueItems.length) {
+            els.queueList.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500 italic">Kein Upload vorhanden.</td></tr>';
+            return;
+        }
+
+        const items = [...queueItems].sort((a, b) => {
+            const ap = a.queue_priority ?? Number.POSITIVE_INFINITY;
+            const bp = b.queue_priority ?? Number.POSITIVE_INFINITY;
+            if (ap !== bp) return ap - bp;
+            return String(a.queued_at || a.created_at || '').localeCompare(String(b.queued_at || b.created_at || ''));
+        });
+
+        items.forEach((item) => {
+            const isQueued = item.state === 'QUEUED';
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-slate-700/30 transition-colors';
+            row.dataset.jobId = item.id;
+            row.innerHTML = `
+                <td class="px-3 py-3 font-mono text-slate-300 truncate">${escapeHtml(item.filename)}</td>
+                <td class="px-3 py-3 text-xs font-bold">${stateBadge(item.state)}</td>
+                <td class="px-3 py-3">
+                    <div class="inline-flex rounded-md overflow-hidden border border-slate-600">
+                        <button onclick="setQueueMode('${escapeHtml(item.id)}', 'TURBO')" class="px-3 py-1.5 text-xs ${item.mode === 'TURBO' ? 'bg-cyan-500/30 text-cyan-200' : 'bg-slate-900 text-slate-300 hover:bg-slate-700'}">
+                            Turbo
+                        </button>
+                        <button onclick="setQueueMode('${escapeHtml(item.id)}', 'ARTIST')" class="px-3 py-1.5 text-xs ${item.mode === 'ARTIST' ? 'bg-purple-500/30 text-purple-200' : 'bg-slate-900 text-slate-300 hover:bg-slate-700'}">
+                            Artist
+                        </button>
+                    </div>
+                </td>
+                <td class="px-3 py-3">
+                    <div class="flex items-center justify-end gap-2">
+                        <button type="button" class="queue-drag-handle text-slate-400 hover:text-slate-200 transition-colors px-2 py-1 rounded text-xs cursor-grab" title="Ziehen">
+                            <i class="fa-solid fa-grip-vertical"></i>
+                        </button>
+                        <button onclick="startJob('${escapeHtml(item.id)}', '${item.mode}')" ${isQueued ? 'disabled' : ''} class="text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 transition-colors px-2 py-1 rounded text-xs disabled:opacity-30 disabled:cursor-not-allowed" title="Start Render">
+                            <i class="fa-solid fa-play"></i>
+                        </button>
+                        <button onclick="deleteJob('${escapeHtml(item.id)}')" class="text-slate-500 hover:text-red-400 transition-colors px-2 py-1 rounded text-xs" title="Löschen">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            els.queueList.appendChild(row);
+        });
+    }
+
+    function initQueueSortable() {
+        if (!els.queueList || queueSortable || typeof Sortable === 'undefined') return;
+        queueSortable = Sortable.create(els.queueList, {
+            animation: 150,
+            handle: '.queue-drag-handle',
+            draggable: 'tr',
+            ghostClass: 'queue-drag-ghost',
+            chosenClass: 'queue-drag-chosen',
+            onStart: () => {
+                isQueueDragging = true;
+            },
+            onEnd: () => {
+                isQueueDragging = false;
+                const orderedIds = Array.from(els.queueList.querySelectorAll('tr[data-job-id]'))
+                    .map((row) => row.dataset.jobId)
+                    .filter(Boolean);
+                if (orderedIds.length) {
+                    reorderQueue(orderedIds);
+                }
+            }
+        });
+    }
+
+    async function reorderQueue(order) {
+        try {
+            const res = await fetch('/queue/reorder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Reihenfolge konnte nicht gespeichert werden');
+            updateStatus();
+        } catch (err) {
+            console.error(err);
+            updateStatus();
+        }
+    }
+
+    function renderFinished(jobs) {
+        const signature = jobs
+            .map((job) => `${job.id}:${job.completed_at || job.state || ''}:${job.has_image ? '1' : '0'}`)
+            .join('|');
+        if (signature === lastFinishedSig) return;
+        lastFinishedSig = signature;
+
+        els.finishedList.innerHTML = '';
+        if (!jobs.length) {
+            els.finishedList.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500 italic">Noch keine fertigen Jobs.</td></tr>';
+            return;
+        }
+
+        jobs.forEach((job) => {
+            const hasImage = job.has_image !== false;
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-slate-700/30 transition-colors';
+            const previewUrl = `/jobs/${encodeURIComponent(job.id)}/preview-image`;
+            row.innerHTML = `
+                <td class="px-3 py-2">
+                    <div class="relative w-20 h-12">
+                        <img data-preview src="${previewUrl}" alt="Vorschau" loading="lazy" decoding="async" class="w-20 h-12 object-cover rounded border border-slate-700 opacity-0 transition-opacity duration-200">
+                        <div data-preview-fallback class="absolute inset-0 flex items-center justify-center rounded border border-dashed border-slate-600 bg-slate-900 text-[10px] text-slate-500 transition-opacity duration-200">
+                            kein Preview
+                        </div>
+                    </div>
+                </td>
+                <td class="px-3 py-2 font-mono text-slate-300 truncate max-w-xs">${escapeHtml(job.filename || job.id)}</td>
+                <td class="px-3 py-2 text-xs font-bold">${modeBadge(job.mode)}</td>
+                <td class="px-3 py-2">
+                    <div class="text-xs text-slate-500">Gerendert</div>
+                    <div class="text-sm text-slate-200">${escapeHtml(formatDate(job.completed_at))}</div>
+                    <div class="text-xs text-slate-500 mt-1">Auflösung</div>
+                    <div class="text-sm text-slate-200" data-resolution>--</div>
+                    <div class="text-xs text-slate-500 mt-1">Samples</div>
+                    <div class="text-sm text-slate-200">${escapeHtml(formatSampleCount(job))}</div>
+                    <div class="text-xs text-slate-500 mt-1">Turbo Summary</div>
+                    <div class="text-xs text-slate-300">${escapeHtml(formatTurboSummary(job))}</div>
+                </td>
+                <td class="px-3 py-2 text-sm text-slate-200">${escapeHtml(formatDuration(job.started_at, job.completed_at))}</td>
+                <td class="px-3 py-2 text-right">
+                    <a href="/jobs/${encodeURIComponent(job.id)}/download-image" class="${hasImage ? 'text-green-400 hover:text-green-300' : 'text-slate-600 opacity-40 pointer-events-none'} transition-colors p-2 inline-block" title="PNG herunterladen">
+                        <i class="fa-solid fa-download"></i>
+                    </a>
+                    <button onclick="deleteFinishedImages('${escapeHtml(job.id)}')" ${hasImage ? '' : 'disabled'} class="${hasImage ? 'text-slate-500 hover:text-red-400' : 'text-slate-600 opacity-40 cursor-not-allowed'} transition-colors p-2" title="Render-Bilder löschen">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                    <button onclick="toggleHistory('${escapeHtml(job.id)}', this)" class="text-slate-400 hover:text-slate-200 transition-colors p-2" title="Render-Historie">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                    </button>
+                </td>
+            `;
+            els.finishedList.appendChild(row);
+
+            const previewImg = row.querySelector('[data-preview]');
+            const previewFallback = row.querySelector('[data-preview-fallback]');
+            const resolutionEl = row.querySelector('[data-resolution]');
+
+            previewImg.addEventListener('load', () => {
+                previewImg.classList.remove('opacity-0');
+                previewImg.classList.add('opacity-100');
+                previewFallback.classList.add('opacity-0');
+                previewFallback.classList.add('pointer-events-none');
+                if (previewImg.naturalWidth && previewImg.naturalHeight) {
+                    resolutionEl.innerText = `${previewImg.naturalWidth}×${previewImg.naturalHeight}`;
+                }
+            });
+
+            previewImg.addEventListener('error', () => {
+                previewImg.classList.add('opacity-0');
+                previewFallback.classList.remove('opacity-0');
+                previewFallback.classList.remove('pointer-events-none');
+                resolutionEl.innerText = '-';
+            });
+        });
+    }
+
+    function renderFailed(jobs) {
+        const signature = jobs
+            .map((job) => `${job.id}:${job.reason || job.state || ''}:${job.completed_at || ''}`)
+            .join('|');
+        const pageSignature = `${failedPagination.page}|${signature}`;
+        if (pageSignature === lastFailedSig) return;
+        lastFailedSig = pageSignature;
+
+        failedPagination.totalPages = Math.max(1, Math.ceil(jobs.length / failedPagination.pageSize));
+        if (failedPagination.page > failedPagination.totalPages) {
+            failedPagination.page = failedPagination.totalPages;
+        }
+
+        const start = (failedPagination.page - 1) * failedPagination.pageSize;
+        const pageJobs = jobs.slice(start, start + failedPagination.pageSize);
+
+        els.failedPageInfo.innerText = `Seite ${failedPagination.page}/${failedPagination.totalPages}`;
+        els.failedPrev.disabled = failedPagination.page <= 1;
+        els.failedNext.disabled = failedPagination.page >= failedPagination.totalPages;
+
+        els.failedList.innerHTML = '';
+        if (!pageJobs.length) {
+            els.failedList.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-slate-500 italic">Keine fehlgeschlagenen Jobs.</td></tr>';
+            return;
+        }
+
+        pageJobs.forEach((job) => {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-slate-700/30 transition-colors';
+            const highlights = Array.isArray(job.log_highlights) ? job.log_highlights : [];
+            const highlightHtml = highlights.length
+                ? `<div class="text-xs text-slate-500 mt-1">${highlights.map((line) => escapeHtml(line)).join('<br>')}</div>`
+                : '';
+            row.innerHTML = `
+                <td class="px-3 py-2 font-mono text-slate-300 truncate max-w-xs">${escapeHtml(job.filename || job.id)}</td>
+                <td class="px-3 py-2">
+                    ${escapeHtml(job.reason || job.state || 'FAILED')}
+                    ${highlightHtml}
+                </td>
+                <td class="px-3 py-2 text-xs text-slate-200">${escapeHtml(formatDuration(job.started_at, job.completed_at))}</td>
+                <td class="px-3 py-2 text-right space-x-2">
+                    <button onclick="retryJob('${escapeHtml(job.id)}')" class="text-amber-400 hover:text-amber-300 transition-colors p-2" title="Erneut einreihen">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+                    <button onclick="toggleHistory('${escapeHtml(job.id)}', this)" class="text-slate-400 hover:text-slate-200 transition-colors p-2" title="Render-Historie">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                    </button>
+                </td>
+            `;
+            els.failedList.appendChild(row);
+        });
+    }
+
+    function changeFailedPage(delta) {
+        const next = failedPagination.page + delta;
+        if (next < 1 || next > failedPagination.totalPages) return;
+        failedPagination.page = next;
+        refreshArchives(true);
+    }
+
+    async function startAllJobs() {
+        try {
+            const res = await fetch('/queue/start-all', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Start aller Jobs fehlgeschlagen');
+            updateStatus();
+        } catch (err) {
+            alert(err.message || 'Start fehlgeschlagen.');
+        }
+    }
+
+    async function clearQueue() {
+        if (!confirm('Queue leeren und aktiven Render abbrechen?')) return;
+        try {
+            const res = await fetch('/queue/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cancel_active: true }) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Queue konnte nicht geleert werden');
+            updateStatus();
+        } catch (err) {
+            alert(err.message || 'Fehler beim Leeren der Queue.');
+        }
+    }
+
+    async function retryAllFailed() {
+        if (!confirm('Alle fehlgeschlagenen Jobs erneut einreihen?')) return;
+        try {
+            const res = await fetch('/jobs/failed/retry-all', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Retry fehlgeschlagen');
+            updateStatus();
+        } catch (err) {
+            alert(err.message || 'Retry fehlgeschlagen.');
+        }
+    }
+
+    async function toggleHistory(jobId, triggerEl) {
+        const row = triggerEl.closest('tr');
+        if (!row) return;
+        const existing = row.nextElementSibling;
+        if (existing && existing.dataset && existing.dataset.historyRow === jobId) {
+            existing.remove();
+            return;
+        }
+
+        const colspan = row.children.length || 1;
+        const historyRow = document.createElement('tr');
+        historyRow.dataset.historyRow = jobId;
+        historyRow.innerHTML = `
+            <td colspan="${colspan}" class="px-4 py-3 bg-slate-900/40 text-xs text-slate-400">
+                Lade Historie...
+            </td>
+        `;
+        row.after(historyRow);
+
+        try {
+            const res = await fetch(`/jobs/${encodeURIComponent(jobId)}/history`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Historie konnte nicht geladen werden');
+
+            const attempts = Array.isArray(data.attempts) ? data.attempts : [];
+            if (!attempts.length) {
+                historyRow.innerHTML = `<td colspan="${colspan}" class="px-4 py-3 text-xs text-slate-500">Keine Historie gefunden.</td>`;
+                return;
+            }
+
+            const lines = attempts.map((attempt) => {
+                const doneAt = formatDateShort(attempt.completed_at);
+                const duration = formatDuration(attempt.started_at, attempt.completed_at);
+                const hiprt = attempt.hiprt_used ? 'HIP-RT an' : 'HIP-RT aus';
+                const reason = attempt.reason ? ` | ${escapeHtml(attempt.reason)}` : '';
+                return `#${attempt.attempt || '?'} ${escapeHtml(attempt.state || '-')} | ${escapeHtml(doneAt)} | ${escapeHtml(duration)} | ${escapeHtml(hiprt)}${reason}`;
+            });
+
+            historyRow.innerHTML = `
+                <td colspan="${colspan}" class="px-4 py-3 bg-slate-900/40 text-xs text-slate-400 space-y-1">
+                    ${lines.map((line) => `<div>${line}</div>`).join('')}
+                </td>
+            `;
+        } catch (err) {
+            historyRow.innerHTML = `<td colspan="${colspan}" class="px-4 py-3 text-xs text-red-400">Historie konnte nicht geladen werden.</td>`;
+        }
+    }
+
+    async function cancelJob() {
+        if (!confirm('Wirklich abbrechen?')) return;
+        const res = await fetch('/cancel', { method: 'POST' });
+        if (!res.ok) {
+            const data = await res.json();
+            alert(data.error || 'Abbruch fehlgeschlagen');
+        }
+        updateStatus();
+    }
+
+    async function setQueueMode(jobId, mode) {
+        const res = await fetch(`/jobs/${encodeURIComponent(jobId)}/mode`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Modus konnte nicht gespeichert werden');
+        }
+        updateStatus();
+    }
+
+    async function startJob(jobId, mode = 'TURBO') {
+        const res = await fetch(`/jobs/${encodeURIComponent(jobId)}/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Start fehlgeschlagen');
+            return;
+        }
+        updateStatus();
+    }
+
+    async function deleteJob(jobId) {
+        if (!confirm(`Job ${jobId} aus der Queue löschen?`)) return;
+        const res = await fetch(`/delete/${encodeURIComponent(jobId)}`, { method: 'POST' });
+        if (!res.ok) {
+            const data = await res.json();
+            alert(data.error || 'Löschen fehlgeschlagen');
+        }
+        updateStatus();
+    }
+
+    async function deleteFinishedImages(jobId) {
+        if (!confirm(`Render-Bilder von Job ${jobId} löschen?`)) return;
+        const res = await fetch(`/jobs/${encodeURIComponent(jobId)}/delete-images`, { method: 'POST' });
+        if (!res.ok) {
+            const data = await res.json();
+            alert(data.error || 'Löschen fehlgeschlagen');
+            return;
+        }
+        updateStatus();
+    }
+
+    async function retryJob(jobId) {
+        const res = await fetch(`/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Retry fehlgeschlagen');
+            return;
+        }
+        alert(`Job neu eingereiht: ${data.filename}`);
+        updateStatus();
+    }
+
+    els.fileInput.addEventListener('change', handleFileSelected);
+
+    function setStagedFile(file) {
+        stagedFile = file || null;
+        if (!stagedFile) {
+            els.uploadStatus.innerText = 'Keine Datei ausgewählt.';
+            els.uploadStatus.className = 'text-center md:text-left text-sm font-bold h-5 text-slate-400';
+            els.queueSubmit.disabled = true;
+            return;
+        }
+        els.uploadStatus.innerText = `Bereit: ${stagedFile.name}`;
+        els.uploadStatus.className = 'text-center md:text-left text-sm font-bold h-5 text-cyan-300';
+        els.queueSubmit.disabled = false;
+    }
+
+    function handleFileSelected(e) {
+        const file = e.target.files[0];
+        setStagedFile(file);
+    }
+
+    async function submitQueuedFile() {
+        if (!stagedFile) return;
+
+        const mode = document.querySelector('input[name="render-mode"]:checked').value;
+        const formData = new FormData();
+        formData.append('file', stagedFile);
+        formData.append('mode', mode);
+
+        els.uploadStatus.innerText = '⏳ Upload läuft...';
+        els.uploadStatus.className = 'text-center md:text-left text-sm font-bold h-5 text-cyan-400 animate-pulse';
+        els.dropZone.classList.add('opacity-50', 'pointer-events-none');
+        els.queueSubmit.disabled = true;
+
+        try {
+            const res = await fetch('/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Upload fehlgeschlagen');
+            }
+            els.uploadStatus.innerText = `✅ Eingereiht: ${data.filename}`;
+            els.uploadStatus.className = 'text-center md:text-left text-sm font-bold h-5 text-green-500';
+            els.fileInput.value = '';
+            stagedFile = null;
+            els.queueSubmit.disabled = true;
+            const artistMode = document.querySelector('input[name="render-mode"][value="artist"]');
+            if (artistMode) artistMode.checked = true;
+            updateStatus();
+        } catch (err) {
+            els.uploadStatus.innerText = `❌ ${err.message || 'Fehler beim Upload'}`;
+            els.uploadStatus.className = 'text-center md:text-left text-sm font-bold h-5 text-red-500';
+            if (stagedFile) els.queueSubmit.disabled = false;
+        } finally {
+            setTimeout(() => {
+                if (!stagedFile) {
+                    els.uploadStatus.innerText = 'Keine Datei ausgewählt.';
+                    els.uploadStatus.className = 'text-center md:text-left text-sm font-bold h-5 text-slate-400';
+                }
+                els.dropZone.classList.remove('opacity-50', 'pointer-events-none');
+            }, 2500);
+        }
+    }
+
+    ['dragenter', 'dragover'].forEach((eventName) => {
+        els.dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            els.dropZone.classList.add('border-cyan-500', 'bg-slate-700');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach((eventName) => {
+        els.dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            els.dropZone.classList.remove('border-cyan-500', 'bg-slate-700');
+        });
+    });
+
+    els.dropZone.addEventListener('drop', (e) => {
+        const files = e.dataTransfer.files;
+        els.fileInput.files = files;
+        handleFileSelected({ target: els.fileInput });
+    });
+
+    els.turboUseDenoising.addEventListener('change', syncDenoiserUI);
+    const artistMode = document.querySelector('input[name="render-mode"][value="artist"]');
+    if (artistMode) artistMode.checked = true;
+    initQueueSortable();
+    loadTurboSettings();
+    updateStatus();
+</script>
+</body>
+</html>

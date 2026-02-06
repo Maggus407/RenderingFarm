@@ -1,0 +1,30 @@
+<section class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
+    <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-white"><i class="fa-solid fa-triangle-exclamation mr-2 text-amber-400"></i>Fehlgeschlagene Jobs</h3>
+        <div class="flex items-center gap-2 text-xs">
+            <button onclick="retryAllFailed()" class="px-2.5 py-1 rounded border border-amber-500/40 text-amber-300 hover:bg-amber-500/20">
+                <i class="fa-solid fa-rotate-right mr-1"></i>Alle erneut
+            </button>
+            <button id="failed-prev" onclick="changeFailedPage(-1)" class="px-2 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed" disabled>
+                <i class="fa-solid fa-chevron-left"></i>
+            </button>
+            <span id="failed-page-info" class="text-slate-400 min-w-20 text-center">Seite 1/1</span>
+            <button id="failed-next" onclick="changeFailedPage(1)" class="px-2 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed" disabled>
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-400">
+            <thead class="text-xs uppercase bg-slate-700/50 text-slate-300">
+            <tr>
+                <th class="px-3 py-2">Datei</th>
+                <th class="px-3 py-2">Grund</th>
+                <th class="px-3 py-2">Dauer</th>
+                <th class="px-3 py-2 text-right">Aktion</th>
+            </tr>
+            </thead>
+            <tbody id="failed-list" class="divide-y divide-slate-700"></tbody>
+        </table>
+    </div>
+</section>

@@ -1,0 +1,314 @@
+<section class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
+    <h3 class="text-lg font-semibold mb-4 text-white"><i class="fa-solid fa-upload mr-2"></i>Neuen Job starten</h3>
+
+    <div class="mb-6 space-y-3">
+        <div id="drop-zone" class="border-2 border-dashed border-slate-600 rounded-xl p-8 text-center hover:border-cyan-500 hover:bg-slate-700/50 transition-colors cursor-pointer relative">
+            <input type="file" id="file-input" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".blend">
+            <i class="fa-solid fa-cloud-arrow-up text-4xl text-slate-500 mb-3"></i>
+            <p class="text-slate-300 font-medium">Drag & Drop .blend Datei hierher</p>
+            <p class="text-slate-500 text-sm mt-1">oder klicken zum Auswählen (wird erst mit Button eingereiht)</p>
+        </div>
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div id="upload-status" class="text-center md:text-left text-sm font-bold h-5 text-slate-400">
+                Keine Datei ausgewählt.
+            </div>
+            <button id="queue-submit" onclick="submitQueuedFile()" disabled class="px-4 py-2 rounded border border-cyan-500/40 text-cyan-200 bg-cyan-500/20 hover:bg-cyan-500/30 disabled:opacity-40 disabled:cursor-not-allowed">
+                In Warteschlange senden
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 mb-6">
+        <label class="cursor-pointer relative">
+            <input type="radio" name="render-mode" value="turbo" class="peer sr-only">
+            <div class="p-4 rounded-lg border border-slate-600 bg-slate-800 peer-checked:border-cyan-500 peer-checked:bg-cyan-500/10 hover:bg-slate-700 transition-all text-center">
+                <i class="fa-solid fa-rocket text-2xl mb-2 text-cyan-400"></i>
+                <div class="font-bold text-white">Turbo Mode</div>
+                <div class="text-xs text-slate-400">Optimierte Settings (Schnell)</div>
+            </div>
+        </label>
+        <label class="cursor-pointer relative">
+            <input type="radio" name="render-mode" value="artist" checked class="peer sr-only">
+            <div class="p-4 rounded-lg border border-slate-600 bg-slate-800 peer-checked:border-purple-500 peer-checked:bg-purple-500/10 hover:bg-slate-700 transition-all text-center">
+                <i class="fa-solid fa-palette text-2xl mb-2 text-purple-400"></i>
+                <div class="font-bold text-white">Artist Mode</div>
+                <div class="text-xs text-slate-400">Deine Settings bleiben</div>
+            </div>
+        </label>
+    </div>
+
+    <details class="mb-6 rounded-lg border border-slate-700 bg-slate-900/50">
+        <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
+            <span><i class="fa-solid fa-sliders mr-2"></i>Turbo Settings</span>
+            <span class="text-xs text-slate-400">Aufklappen zum Konfigurieren</span>
+        </summary>
+        <div class="border-t border-slate-700 p-4">
+            <div class="space-y-3">
+                <details class="rounded-lg border border-slate-700 bg-slate-900/40">
+                <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
+                    <span>Sampling</span>
+                    <span class="text-xs text-slate-500">Aufklappen</span>
+                </summary>
+                <div class="border-t border-slate-700 p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div class="md:col-span-3 text-xs text-slate-300">Adaptive Sampling</div>
+                        <div class="md:col-span-3">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="turbo-use-adaptive-sampling" type="checkbox" class="accent-cyan-500">
+                                <span>Aktiv</span>
+                            </label>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Adaptive Sampling reduziert Renderzeit bei ähnlicher Qualität.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Samples</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-samples" type="number" min="1" max="65536" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Mehr Samples = weniger Rauschen, aber langsamer.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Noise Threshold</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-adaptive-threshold" type="number" min="0.000001" max="1" step="0.0001" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Niedriger = sauberer, aber langsamer.
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="rounded-lg border border-slate-700 bg-slate-900/40">
+                <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
+                    <span>Denoising</span>
+                    <span class="text-xs text-slate-500">Aufklappen</span>
+                </summary>
+                <div class="border-t border-slate-700 p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div class="md:col-span-3 text-xs text-slate-300">Denoising</div>
+                        <div class="md:col-span-3">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="turbo-use-denoising" type="checkbox" class="accent-cyan-500">
+                                <span>Aktiv</span>
+                            </label>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Denoiser glättet Rauschen, spart Samples, kann Details weichen.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Denoiser</label>
+                        <div class="md:col-span-3">
+                            <select id="turbo-denoiser" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                                <option value="OPENIMAGEDENOISE">OIDN</option>
+                                <option value="OPTIX">OptiX</option>
+                                <option value="NLM">NLM</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            OIDN ist stabil auf AMD; OptiX ist Nvidia-spezifisch.
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="rounded-lg border border-slate-700 bg-slate-900/40">
+                <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
+                    <span>Light Paths</span>
+                    <span class="text-xs text-slate-500">Aufklappen</span>
+                </summary>
+                <div class="border-t border-slate-700 p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Max Bounces</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-max-bounces" type="number" min="0" max="64" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">-</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Diffuse Bounces</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-diffuse-bounces" type="number" min="0" max="64" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">-</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Glossy Bounces</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-glossy-bounces" type="number" min="0" max="64" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">-</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Transmission Bounces</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-transmission-bounces" type="number" min="0" max="64" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">-</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Transparent Bounces</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-transparent-max-bounces" type="number" min="0" max="64" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">-</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Volume Bounces</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-volume-bounces" type="number" min="0" max="64" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">-</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Clamp Direct</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-clamp-direct" type="number" min="0" max="100" step="0.1" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Begrenzt direkte Lichtspitzen; zu niedrig = flacher Look.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Clamp Indirect</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-clamp-indirect" type="number" min="0" max="100" step="0.1" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Reduziert Fireflies; zu niedrig = dunkler.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Filter Glossy</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-filter-glossy" type="number" min="0" max="10" step="0.1" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Macht Glanz weicher, reduziert Rauschen.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div class="md:col-span-3 text-xs text-slate-300">Reflective Caustics</div>
+                        <div class="md:col-span-3">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="turbo-caustics-reflective" type="checkbox" class="accent-cyan-500">
+                                <span>Aktiv</span>
+                            </label>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Reflektive Caustics sind teuer; meist deaktivieren.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div class="md:col-span-3 text-xs text-slate-300">Refractive Caustics</div>
+                        <div class="md:col-span-3">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="turbo-caustics-refractive" type="checkbox" class="accent-cyan-500">
+                                <span>Aktiv</span>
+                            </label>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Refraktive Caustics sind teuer; meist deaktivieren.
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="rounded-lg border border-slate-700 bg-slate-900/40">
+                <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
+                    <span>Simplify</span>
+                    <span class="text-xs text-slate-500">Aufklappen</span>
+                </summary>
+                <div class="border-t border-slate-700 p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div class="md:col-span-3 text-xs text-slate-300">Simplify</div>
+                        <div class="md:col-span-3">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="turbo-use-simplify" type="checkbox" class="accent-cyan-500">
+                                <span>Aktiv</span>
+                            </label>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Reduziert Geometrie-Last und spart Renderzeit.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Subdivision (max 5)</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-simplify-subdivision-render" type="number" min="0" max="5" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Max 5 wegen HIP-Stabilität auf 7900XTX (Crash-Risiko darüber).
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="rounded-lg border border-slate-700 bg-slate-900/40">
+                <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
+                    <span>Performance</span>
+                    <span class="text-xs text-slate-500">Aufklappen</span>
+                </summary>
+                <div class="border-t border-slate-700 p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                        <label class="md:col-span-3 text-xs text-slate-300">Tile Size</label>
+                        <div class="md:col-span-3">
+                            <input id="turbo-tile-size" type="number" min="64" max="4096" step="64" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Große Tiles = besser für GPU, aber VRAM-Last steigt.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div class="md:col-span-3 text-xs text-slate-300">Persistent Data</div>
+                        <div class="md:col-span-3">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="turbo-use-persistent-data" type="checkbox" class="accent-cyan-500">
+                                <span>Aktiv</span>
+                            </label>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            Hilfreich bei mehreren Renders hintereinander.
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="rounded-lg border border-slate-700 bg-slate-900/40">
+                <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
+                    <span>Hardware</span>
+                    <span class="text-xs text-slate-500">Aufklappen</span>
+                </summary>
+                <div class="border-t border-slate-700 p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div class="md:col-span-3 text-xs text-slate-300">HIP-RT</div>
+                        <div class="md:col-span-3">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="turbo-use-hiprt" type="checkbox" class="accent-cyan-500">
+                                <span>Aktiv</span>
+                            </label>
+                        </div>
+                        <div class="md:col-span-6 text-[11px] text-slate-500">
+                            HIP-RT beschleunigt, kann bei manchen Szenen instabil sein.
+                        </div>
+                    </div>
+                </div>
+            </details>
+            </div>
+            <div class="mt-4 flex items-center gap-3">
+            <button onclick="saveTurboSettings()" class="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-500/40 px-3 py-1.5 rounded text-sm">
+                <i class="fa-solid fa-floppy-disk mr-1"></i>Turbo Settings speichern
+            </button>
+            <button onclick="resetTurboSettings()" class="bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-500/60 px-3 py-1.5 rounded text-sm">
+                <i class="fa-solid fa-rotate-left mr-1"></i>Default Turbo
+            </button>
+            <span id="turbo-settings-status" class="text-xs text-slate-400"></span>
+            </div>
+        </div>
+    </details>
+</section>
