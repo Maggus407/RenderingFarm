@@ -75,6 +75,82 @@ def force_managed_output():
     print(f"[SETUP] Managed output path: {bpy.context.scene.render.filepath}")
 
 
+def configure_exr(scene: bpy.types.Scene, multilayer: bool) -> None:
+    try:
+        image_settings = scene.render.image_settings
+        image_settings.file_format = "OPEN_EXR_MULTILAYER" if multilayer else "OPEN_EXR"
+        image_settings.color_depth = "16"
+        if hasattr(image_settings, "exr_codec"):
+            image_settings.exr_codec = "ZIP"
+        if hasattr(image_settings, "color_mode"):
+            image_settings.color_mode = "RGBA"
+    except Exception as exc:
+        print(f"[PIPELINE] Failed to set EXR settings: {exc}")
+
+
+def wants_compositor_output() -> bool:
+    raw = os.environ.get("RENDER_COMPOSITOR_OUTPUT", "")
+    if raw is None or str(raw).strip() == "":
+        return False
+    raw = str(raw).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def set_compositor_enabled(scene: bpy.types.Scene, enabled: bool) -> None:
+    if hasattr(scene.render, "use_compositing"):
+        scene.render.use_compositing = bool(enabled)
+
+
+def apply_artist_simplify_override(scene: bpy.types.Scene) -> None:
+    raw = os.environ.get("ARTIST_SIMPLIFY_SUBDIV", "").strip()
+    if not raw:
+        return
+    try:
+        value = int(raw)
+    except ValueError:
+        return
+    value = max(0, min(5, value))
+    if value <= 0:
+        return
+    scene.render.use_simplify = True
+    scene.render.simplify_subdivision_render = value
+    print(f"[ARTIST] Simplify subdivision render override: {value}")
+
+
+def ensure_compositor_exr(_scene=None):
+    raw = os.environ.get("RENDER_PIPELINE", "NORMAL")
+    pipeline = raw.strip().upper()
+    if pipeline in {"COMP", "COMPOSITE", "COMPOSITOR"}:
+        scene = bpy.context.scene
+        if wants_compositor_output():
+            scene.use_nodes = True
+            set_compositor_enabled(scene, True)
+        else:
+            set_compositor_enabled(scene, False)
+
+
+def apply_render_pipeline():
+    raw = os.environ.get("RENDER_PIPELINE", "NORMAL")
+    pipeline = raw.strip().upper()
+    if pipeline in {"COMP", "COMPOSITE", "COMPOSITOR"}:
+        pipeline = "COMPOSITOR"
+    else:
+        pipeline = "NORMAL"
+
+    scene = bpy.context.scene
+    if pipeline == "COMPOSITOR":
+        if wants_compositor_output():
+            scene.use_nodes = True
+            set_compositor_enabled(scene, True)
+            print("[PIPELINE] COMPOSITOR: compositor output enabled")
+        else:
+            set_compositor_enabled(scene, False)
+            print("[PIPELINE] COMPOSITOR: compositor output disabled; using blend output settings")
+    else:
+        set_compositor_enabled(scene, False)
+        print("[PIPELINE] NORMAL: compositor disabled")
+
+
 def setup_preview_writer():
     preview_dir = os.environ.get("RENDER_PREVIEW_DIR")
     if not preview_dir:
@@ -284,10 +360,18 @@ def main():
     force_managed_output()
     setup_preview_writer()
     setup_tile_progress_logger()
+    try:
+        handlers = bpy.app.handlers.render_pre
+        if ensure_compositor_exr not in handlers:
+            handlers.append(ensure_compositor_exr)
+    except Exception as exc:
+        print(f"[PIPELINE] render_pre handler failed: {exc}")
 
     mode = os.environ.get("RENDER_MODE", "TURBO").strip().upper()
     if mode == "ARTIST":
         print("[MODE] ARTIST: keep scene settings")
+        apply_render_pipeline()
+        apply_artist_simplify_override(bpy.context.scene)
     else:
         print("[MODE] TURBO: override settings")
         apply_turbo_settings()

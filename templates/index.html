@@ -65,6 +65,9 @@
         fileInput: document.getElementById('file-input'),
         uploadStatus: document.getElementById('upload-status'),
         queueSubmit: document.getElementById('queue-submit'),
+        artistRenderToggle: document.getElementById('artist-render-toggle'),
+        artistUseHiprt: document.getElementById('artist-use-hiprt'),
+        artistSimplifySubdiv: document.getElementById('artist-simplify-subdiv'),
         turboUseSimplify: document.getElementById('turbo-use-simplify'),
         turboSimplifySubdivisionRender: document.getElementById('turbo-simplify-subdivision-render'),
         turboUseAdaptiveSampling: document.getElementById('turbo-use-adaptive-sampling'),
@@ -105,6 +108,7 @@
     let queueSortable = null;
     let isQueueDragging = false;
     let stagedFile = null;
+    const hiddenFinishedJobs = new Set();
 
     function escapeHtml(value) {
         return String(value)
@@ -208,11 +212,70 @@
         return Math.max(0, seconds);
     }
 
+    function formatDurationSeconds(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) return '--';
+        const total = Math.round(seconds);
+        const s = total % 60;
+        const m = Math.floor(total / 60) % 60;
+        const h = Math.floor(total / 3600);
+        if (h > 0) {
+            return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+        return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function estimateRemainingSeconds(job) {
+        if (!job || job.status !== 'RENDERING' || !job.started_at) return null;
+        const started = new Date(job.started_at);
+        if (Number.isNaN(started.getTime())) return null;
+        const elapsedSec = (Date.now() - started.getTime()) / 1000;
+        if (!Number.isFinite(elapsedSec) || elapsedSec <= 1) return null;
+
+        let progress = null;
+        const sampleCurrent = Number(job.sample_current);
+        const sampleTotal = Number(job.sample_total);
+        if (Number.isFinite(sampleCurrent) && Number.isFinite(sampleTotal) && sampleTotal > 0 && sampleCurrent > 0) {
+            progress = Math.min(1, sampleCurrent / sampleTotal);
+        }
+
+        if (progress === null) {
+            const tileCurrent = Number(job.tile_current);
+            const tileTotal = Number(job.tile_total);
+            if (Number.isFinite(tileCurrent) && Number.isFinite(tileTotal) && tileTotal > 0 && tileCurrent > 0) {
+                progress = Math.min(1, tileCurrent / tileTotal);
+            }
+        }
+
+        if (progress === null) {
+            const pct = Number(job.progress);
+            if (Number.isFinite(pct) && pct > 0) {
+                progress = Math.min(1, pct / 100);
+            }
+        }
+
+        if (!Number.isFinite(progress) || progress <= 0) return null;
+        const total = elapsedSec / progress;
+        const remaining = total - elapsedSec;
+        if (!Number.isFinite(remaining)) return null;
+        return Math.max(0, remaining);
+    }
+
+    function getRemainingSeconds(job) {
+        const parsed = parseDurationSeconds(job?.remaining);
+        if (parsed !== null) {
+            return { seconds: parsed, estimated: false };
+        }
+        const estimated = estimateRemainingSeconds(job);
+        if (estimated === null) return null;
+        return { seconds: estimated, estimated: true };
+    }
+
     function computeTimeProgress(job) {
         if (!job || job.status !== 'RENDERING') return null;
-        if (!job.started_at || !job.remaining) return null;
-        const remainingSec = parseDurationSeconds(job.remaining);
-        if (remainingSec === null) return null;
+        if (!job.started_at) return null;
+        const remainingInfo = getRemainingSeconds(job);
+        if (!remainingInfo) return null;
+        const remainingSec = remainingInfo.seconds;
         const started = new Date(job.started_at);
         if (Number.isNaN(started.getTime())) return null;
         const elapsedSec = (Date.now() - started.getTime()) / 1000;
@@ -230,6 +293,19 @@
         const enabled = els.turboUseDenoising.checked;
         els.turboDenoiser.disabled = !enabled;
         els.turboDenoiser.classList.toggle('opacity-50', !enabled);
+    }
+
+    function syncArtistRenderToggle() {
+        if (!els.artistRenderToggle) return;
+        const mode = document.querySelector('input[name="render-mode"]:checked')?.value || 'artist';
+        els.artistRenderToggle.classList.toggle('hidden', mode !== 'artist');
+    }
+
+    function syncArtistHiprtSimplify() {
+        if (!els.artistUseHiprt || !els.artistSimplifySubdiv) return;
+        if (els.artistUseHiprt.checked) {
+            els.artistSimplifySubdiv.checked = true;
+        }
     }
 
     function applyTurboSettingsToForm(settings) {
@@ -426,7 +502,10 @@
         const tileLabel = tileCurrent !== null && tileTotal !== null ? `Tiles ${tileCurrent}/${tileTotal}` : '';
         const sampleLabel = sampleCurrent !== null && sampleTotal !== null ? `Sample ${sampleCurrent}/${sampleTotal}` : '';
         const statusLabel = [tileLabel, sampleLabel].filter(Boolean).join(' | ');
-        const remainingLabel = job.remaining ? `ETA ${job.remaining}` : '--';
+        const remainingInfo = getRemainingSeconds(job);
+        const remainingLabel = remainingInfo
+            ? `ETA ${formatDurationSeconds(remainingInfo.seconds)}${remainingInfo.estimated ? ' ~' : ''}`
+            : '--';
 
         els.progressBar.style.width = `${pct}%`;
         els.progressBar.innerText = pct > 5 ? `${pct}%` : '';
@@ -531,19 +610,20 @@
     }
 
     function renderFinished(jobs) {
-        const signature = jobs
+        const visibleJobs = (jobs || []).filter((job) => job.has_image !== false && !hiddenFinishedJobs.has(job.id));
+        const signature = visibleJobs
             .map((job) => `${job.id}:${job.completed_at || job.state || ''}:${job.has_image ? '1' : '0'}`)
             .join('|');
         if (signature === lastFinishedSig) return;
         lastFinishedSig = signature;
 
         els.finishedList.innerHTML = '';
-        if (!jobs.length) {
+        if (!visibleJobs.length) {
             els.finishedList.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500 italic">Noch keine fertigen Jobs.</td></tr>';
             return;
         }
 
-        jobs.forEach((job) => {
+        visibleJobs.forEach((job) => {
             const hasImage = job.has_image !== false;
             const row = document.createElement('tr');
             row.className = 'hover:bg-slate-700/30 transition-colors';
@@ -574,7 +654,7 @@
                     <a href="/jobs/${encodeURIComponent(job.id)}/download-image" class="${hasImage ? 'text-green-400 hover:text-green-300' : 'text-slate-600 opacity-40 pointer-events-none'} transition-colors p-2 inline-block" title="PNG herunterladen">
                         <i class="fa-solid fa-download"></i>
                     </a>
-                    <button onclick="deleteFinishedImages('${escapeHtml(job.id)}')" ${hasImage ? '' : 'disabled'} class="${hasImage ? 'text-slate-500 hover:text-red-400' : 'text-slate-600 opacity-40 cursor-not-allowed'} transition-colors p-2" title="Render-Bilder löschen">
+                    <button onclick="deleteFinishedImages('${escapeHtml(job.id)}', this)" class="text-slate-500 hover:text-red-400 transition-colors p-2" title="Render-Bilder löschen">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                     <button onclick="toggleHistory('${escapeHtml(job.id)}', this)" class="text-slate-400 hover:text-slate-200 transition-colors p-2" title="Render-Historie">
@@ -797,13 +877,22 @@
         updateStatus();
     }
 
-    async function deleteFinishedImages(jobId) {
+    async function deleteFinishedImages(jobId, triggerEl) {
         if (!confirm(`Render-Bilder von Job ${jobId} löschen?`)) return;
         const res = await fetch(`/jobs/${encodeURIComponent(jobId)}/delete-images`, { method: 'POST' });
+        const data = await res.json();
         if (!res.ok) {
-            const data = await res.json();
             alert(data.error || 'Löschen fehlgeschlagen');
             return;
+        }
+        hiddenFinishedJobs.add(jobId);
+        const row = triggerEl?.closest('tr');
+        if (row) {
+            const next = row.nextElementSibling;
+            if (next && next.dataset && next.dataset.historyRow === jobId) {
+                next.remove();
+            }
+            row.remove();
         }
         updateStatus();
     }
@@ -843,9 +932,15 @@
         if (!stagedFile) return;
 
         const mode = document.querySelector('input[name="render-mode"]:checked').value;
+        const artistRender = document.querySelector('input[name="artist-render"]:checked')?.value || 'normal';
+        const artistHiprt = els.artistUseHiprt?.checked ? '1' : '0';
+        const artistSimplifySubdiv = els.artistSimplifySubdiv?.checked ? '5' : '0';
         const formData = new FormData();
         formData.append('file', stagedFile);
         formData.append('mode', mode);
+        formData.append('artist_render_mode', artistRender);
+        formData.append('artist_use_hiprt', artistHiprt);
+        formData.append('artist_simplify_subdiv', artistSimplifySubdiv);
 
         els.uploadStatus.innerText = '⏳ Upload läuft...';
         els.uploadStatus.className = 'text-center md:text-left text-sm font-bold h-5 text-cyan-400 animate-pulse';
@@ -865,6 +960,11 @@
             els.queueSubmit.disabled = true;
             const artistMode = document.querySelector('input[name="render-mode"][value="artist"]');
             if (artistMode) artistMode.checked = true;
+            const normalArtist = document.querySelector('input[name="artist-render"][value="normal"]');
+            if (normalArtist) normalArtist.checked = true;
+            if (els.artistUseHiprt) els.artistUseHiprt.checked = false;
+            if (els.artistSimplifySubdiv) els.artistSimplifySubdiv.checked = false;
+            syncArtistRenderToggle();
             updateStatus();
         } catch (err) {
             els.uploadStatus.innerText = `❌ ${err.message || 'Fehler beim Upload'}`;
@@ -902,8 +1002,17 @@
     });
 
     els.turboUseDenoising.addEventListener('change', syncDenoiserUI);
+    if (els.artistUseHiprt) {
+        els.artistUseHiprt.addEventListener('change', syncArtistHiprtSimplify);
+    }
+    document.querySelectorAll('input[name="render-mode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            syncArtistRenderToggle();
+        });
+    });
     const artistMode = document.querySelector('input[name="render-mode"][value="artist"]');
     if (artistMode) artistMode.checked = true;
+    syncArtistRenderToggle();
     initQueueSortable();
     loadTurboSettings();
     updateStatus();

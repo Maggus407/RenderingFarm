@@ -23,13 +23,14 @@ from jobs import (
     list_artifacts,
     make_job_id,
     normalize_mode,
+    normalize_artist_render_mode,
     safe_job_dir,
     sidecar_for_blend,
     unique_filename,
     ensure_within,
 )
 from turbo_settings import DEFAULT_TURBO_SETTINGS, get_turbo_settings, validate_turbo_settings
-from utils import now_iso, now_ms, read_json, write_json
+from utils import as_bool, as_int, now_iso, now_ms, read_json, write_json
 from worker import worker_loop
 import jobs
 
@@ -143,6 +144,9 @@ def upload():
         return jsonify({"error": "Nur .blend Dateien sind erlaubt"}), 400
 
     mode = normalize_mode(request.form.get("mode", "artist"))
+    artist_render_mode = normalize_artist_render_mode(request.form.get("artist_render_mode"))
+    artist_use_hiprt = as_bool(request.form.get("artist_use_hiprt"), False)
+    artist_simplify_subdiv = as_int(request.form.get("artist_simplify_subdiv"), 0, 0, 5)
     stored_name = unique_filename(raw_name)
 
     blend_path = context.UPLOAD_DIR / stored_name
@@ -153,6 +157,9 @@ def upload():
         "original_filename": raw_name,
         "stored_filename": stored_name,
         "mode": mode,
+        "artist_render_mode": artist_render_mode,
+        "artist_use_hiprt": artist_use_hiprt,
+        "artist_simplify_subdiv": artist_simplify_subdiv,
         "created_at": now_iso(),
         "state": "PENDING",
         "queued_at": None,
@@ -182,6 +189,7 @@ def set_job_mode(job_id):
     raw_mode = payload.get("mode") if isinstance(payload, dict) else request.form.get("mode")
     mode = normalize_mode(raw_mode)
     metadata["mode"] = mode
+    metadata["artist_render_mode"] = normalize_artist_render_mode(metadata.get("artist_render_mode"))
     write_json(json_path, metadata)
     return jsonify({"ok": True, "job_id": job_id, "mode": mode, "state": metadata.get("state", "PENDING")})
 
@@ -370,6 +378,24 @@ def start_job(job_id):
         metadata["mode"] = normalize_mode(raw_mode)
     else:
         metadata["mode"] = normalize_mode(metadata.get("mode"))
+
+    raw_artist_render = payload.get("artist_render_mode") if isinstance(payload, dict) else request.form.get("artist_render_mode")
+    if raw_artist_render:
+        metadata["artist_render_mode"] = normalize_artist_render_mode(raw_artist_render)
+    else:
+        metadata["artist_render_mode"] = normalize_artist_render_mode(metadata.get("artist_render_mode"))
+
+    raw_artist_hiprt = payload.get("artist_use_hiprt") if isinstance(payload, dict) else request.form.get("artist_use_hiprt")
+    if raw_artist_hiprt is not None:
+        metadata["artist_use_hiprt"] = as_bool(raw_artist_hiprt, False)
+    else:
+        metadata["artist_use_hiprt"] = as_bool(metadata.get("artist_use_hiprt"), False)
+
+    raw_artist_simplify = payload.get("artist_simplify_subdiv") if isinstance(payload, dict) else request.form.get("artist_simplify_subdiv")
+    if raw_artist_simplify is not None:
+        metadata["artist_simplify_subdiv"] = as_int(raw_artist_simplify, 0, 0, 5)
+    else:
+        metadata["artist_simplify_subdiv"] = as_int(metadata.get("artist_simplify_subdiv"), 0, 0, 5)
 
     if not metadata.get("root_id"):
         metadata["root_id"] = metadata.get("id") or job_id

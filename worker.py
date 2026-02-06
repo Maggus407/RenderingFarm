@@ -55,7 +55,13 @@ def parse_blender_output(line: str) -> dict:
 
 
 def render_command(
-    blend_path: Path, processing_job_dir: Path, mode: str, turbo_settings: dict | None
+    blend_path: Path,
+    processing_job_dir: Path,
+    mode: str,
+    turbo_settings: dict | None,
+    artist_use_hiprt: bool | None,
+    artist_simplify_subdiv: int | None,
+    artist_render_mode: str | None,
 ) -> tuple[list[str], dict]:
     render_script = context.resolve_path(context.CONFIG["RENDER_SCRIPT"])
     optimize_script = context.resolve_path(context.CONFIG["OPTIMIZE_SCRIPT"])
@@ -64,9 +70,16 @@ def render_command(
     env = os.environ.copy()
     env["HSA_XNACK"] = str(context.CONFIG.get("HSA_XNACK", "1"))
     normalized_mode = jobs.normalize_mode(mode)
-    env["USE_HIPRT"] = "1" if normalized_mode == "TURBO" and turbo_settings.get("use_hiprt") else "0"
+    use_hiprt = False
+    if normalized_mode == "TURBO":
+        use_hiprt = bool(turbo_settings.get("use_hiprt"))
+    else:
+        use_hiprt = bool(artist_use_hiprt)
+    env["USE_HIPRT"] = "1" if use_hiprt else "0"
     env["RENDER_GPU_NAME"] = str(context.CONFIG.get("RENDER_GPU_NAME", "Radeon"))
+    env["ARTIST_SIMPLIFY_SUBDIV"] = str(artist_simplify_subdiv or 0)
     env["RENDER_MODE"] = normalized_mode
+    env["RENDER_PIPELINE"] = jobs.normalize_artist_render_mode(artist_render_mode)
     env["BLENDER_BIN"] = str(context.CONFIG.get("BLENDER_BIN", "blender"))
     env["OPTIMIZE_SCRIPT"] = str(optimize_script)
     env["RENDER_OUTPUT_DIR"] = str(processing_job_dir / "renders")
@@ -156,6 +169,7 @@ def worker_loop():
         job_meta = read_json(processing_json, default={})
         job_meta["id"] = job_id
         job_meta["mode"] = mode
+        job_meta["artist_render_mode"] = jobs.normalize_artist_render_mode(job_meta.get("artist_render_mode"))
         job_meta["stored_filename"] = filename
         job_meta["state"] = "RENDERING"
         job_meta["started_at"] = now_iso()
@@ -195,10 +209,18 @@ def worker_loop():
             job_meta["hiprt_used"] = bool(turbo_settings_used.get("use_hiprt"))
         else:
             job_meta["turbo_settings"] = None
-            job_meta["hiprt_used"] = False
+            job_meta["hiprt_used"] = bool(job_meta.get("artist_use_hiprt"))
         write_json(processing_json, job_meta)
 
-        cmd, env = render_command(processing_blend, processing_job_dir, mode, turbo_settings_used)
+        cmd, env = render_command(
+            processing_blend,
+            processing_job_dir,
+            mode,
+            turbo_settings_used,
+            job_meta.get("artist_use_hiprt"),
+            job_meta.get("artist_simplify_subdiv"),
+            job_meta.get("artist_render_mode"),
+        )
 
         returncode = -1
         reason = "Blender Fehler"

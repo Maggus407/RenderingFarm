@@ -4,10 +4,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import context
-from utils import now_iso, now_ms, read_json, write_json
+from utils import as_bool, as_int, now_iso, now_ms, read_json, write_json
 
 IMAGE_EXTS = [".png", ".exr", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"]
 IMAGE_EXTS_SET = set(IMAGE_EXTS)
+
+ARTIST_RENDER_MODES = {"NORMAL", "COMPOSITOR"}
 
 
 def normalize_mode(raw_mode: str) -> str:
@@ -15,6 +17,15 @@ def normalize_mode(raw_mode: str) -> str:
     if mode in {"CUSTOM", "ARTIST"}:
         return "ARTIST"
     return "TURBO"
+
+
+def normalize_artist_render_mode(raw_mode: str | None) -> str:
+    mode = (raw_mode or "NORMAL").strip().upper()
+    if mode in {"COMP", "COMPOSITE", "COMPOSITOR"}:
+        return "COMPOSITOR"
+    if mode not in ARTIST_RENDER_MODES:
+        return "NORMAL"
+    return mode
 
 
 def is_allowed_blend(filename: str) -> bool:
@@ -115,6 +126,21 @@ def ensure_queue_sidecar(blend_path: Path) -> dict:
         metadata["mode"] = mode
         changed = True
 
+    artist_render_mode = normalize_artist_render_mode(metadata.get("artist_render_mode"))
+    if metadata.get("artist_render_mode") != artist_render_mode:
+        metadata["artist_render_mode"] = artist_render_mode
+        changed = True
+
+    artist_use_hiprt = as_bool(metadata.get("artist_use_hiprt"), False)
+    if metadata.get("artist_use_hiprt") != artist_use_hiprt:
+        metadata["artist_use_hiprt"] = artist_use_hiprt
+        changed = True
+
+    artist_simplify_subdiv = as_int(metadata.get("artist_simplify_subdiv"), 0, 0, 5)
+    if metadata.get("artist_simplify_subdiv") != artist_simplify_subdiv:
+        metadata["artist_simplify_subdiv"] = artist_simplify_subdiv
+        changed = True
+
     if not metadata.get("created_at"):
         metadata["created_at"] = now_iso()
         changed = True
@@ -149,6 +175,7 @@ def get_queue() -> list[dict]:
                 "id": metadata["id"],
                 "filename": blend_path.name,
                 "mode": metadata["mode"],
+                "artist_render_mode": metadata.get("artist_render_mode") or "NORMAL",
                 "state": metadata.get("state", "PENDING"),
                 "created_at": metadata.get("created_at"),
                 "queued_at": metadata.get("queued_at"),
@@ -254,6 +281,7 @@ def recover_processing_jobs() -> None:
 
         metadata["id"] = metadata.get("id") or make_job_id()
         metadata["mode"] = mode
+        metadata["artist_render_mode"] = normalize_artist_render_mode(metadata.get("artist_render_mode"))
         metadata["stored_filename"] = restored_name
         metadata["state"] = "QUEUED"
         metadata["recovered_at"] = now_iso()
@@ -386,6 +414,7 @@ def list_archived_jobs(folder: Path, default_state: str) -> list[dict]:
                 "id": job_json.get("id") or job_dir.name,
                 "filename": job_json.get("stored_filename") or job_json.get("original_filename") or "job.blend",
                 "mode": normalize_mode(job_json.get("mode")),
+                "artist_render_mode": normalize_artist_render_mode(job_json.get("artist_render_mode")),
                 "state": state,
                 "created_at": job_json.get("created_at"),
                 "started_at": job_json.get("started_at"),
@@ -425,6 +454,7 @@ def enqueue_auto_retry(failed_dir: Path, job_meta: dict, new_job_id: str) -> str
         "original_filename": job_meta.get("original_filename") or base_name,
         "stored_filename": new_filename,
         "mode": normalize_mode(job_meta.get("mode")),
+        "artist_render_mode": normalize_artist_render_mode(job_meta.get("artist_render_mode")),
         "created_at": now_iso(),
         "state": "QUEUED",
         "queued_at": now_iso(),
