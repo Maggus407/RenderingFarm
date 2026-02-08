@@ -1,13 +1,11 @@
-# RenderingFarm
-
-100% vibe coded.
+# RenderingFarm 100% vibe coded!!!
 
 ## Important
 - Only use this project on a trusted local network.
 - Do not expose it directly to the public internet.
 
 ## What This Is
-This started as a side project to share my GPU (AMD 7900 XTX) for Blender rendering for a colleague.
+Ive startet it as a side project to share my GPU (AMD 7900 XTX) for Blender rendering for a colleague.
 
 Through the web interface, you can upload `.blend` files.
 They are rendered on the machine where this program is running.
