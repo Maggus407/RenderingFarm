@@ -2,3 +2,6 @@ failed/
 input/
 output/
 processing/
+__pycache__/
+.vscode/
+backend/__pycache__/

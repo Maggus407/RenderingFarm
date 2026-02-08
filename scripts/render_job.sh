@@ -32,7 +32,7 @@ if [[ -z "$BLEND_PATH" || -z "$JOB_DIR" ]]; then
 fi
 
 BLENDER_BIN="${BLENDER_BIN:-blender}"
-OPTIMIZE_SCRIPT="${OPTIMIZE_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/turbo_optimize.py}"
+OPTIMIZE_SCRIPT="${OPTIMIZE_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/backend/turbo_optimize.py}"
 
 # Prevent huge ROCm GPU core dumps (gpucore.<pid>) and host core files.
 # Per ROCm docs, ulimit controls both; setting to 0 disables them.

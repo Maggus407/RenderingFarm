@@ -5,7 +5,7 @@
   "FAILED_FOLDER": "failed",
   "BLENDER_BIN": "blender",
   "RENDER_SCRIPT": "scripts/render_job.sh",
-  "OPTIMIZE_SCRIPT": "turbo_optimize.py",
+  "OPTIMIZE_SCRIPT": "backend/turbo_optimize.py",
   "POLL_INTERVAL_SECONDS": 2,
   "HOST": "0.0.0.0",
   "PORT": 5000,

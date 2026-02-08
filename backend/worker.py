@@ -7,10 +7,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import context
-import jobs
-from turbo_settings import build_turbo_settings_for_job
-from utils import now_iso, read_json, write_json
+from backend import context
+from backend import jobs
+from backend.turbo_settings import build_turbo_settings_for_job
+from backend.utils import now_iso, read_json, write_json
 
 
 def parse_blender_output(line: str) -> dict:

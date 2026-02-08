@@ -2,9 +2,9 @@ import re
 import threading
 from pathlib import Path
 
-from utils import read_json, write_json
+from backend.utils import read_json, write_json
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config.json"
 
 DEFAULT_CONFIG = {
@@ -14,7 +14,7 @@ DEFAULT_CONFIG = {
     "FAILED_FOLDER": "failed",
     "BLENDER_BIN": "blender",
     "RENDER_SCRIPT": "scripts/render_job.sh",
-    "OPTIMIZE_SCRIPT": "turbo_optimize.py",
+    "OPTIMIZE_SCRIPT": "backend/turbo_optimize.py",
     "POLL_INTERVAL_SECONDS": 2,
     "HOST": "0.0.0.0",
     "PORT": 5000,
