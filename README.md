@@ -1,13 +1,12 @@
-# RenderingFarm
-
-100% vibe coded.
+# RenderingFarm 100% vibe coded!!!
 
 ## Important
-- Only use this project on a trusted local network.
-- Do not expose it directly to the public internet.
+Only use this project on a trusted local network.
+Do not expose it directly to the public internet.
+Again only LAN use!!
 
 ## What This Is
-This started as a side project to share my GPU (AMD 7900 XTX) for Blender rendering for a colleague.
+Ive startet it as a side project to share my GPU (AMD 7900 XTX) for Blender rendering for a colleague.
 
 Through the web interface, you can upload `.blend` files.
 They are rendered on the machine where this program is running.
@@ -78,22 +77,6 @@ Open in browser:
 3. Choose render mode (Artist or Turbo).
 4. Start/queue the job.
 5. Download output from finished jobs.
-
-## Project Structure
-- `backend/` - Flask backend, worker, job handling, Blender optimization script
-- `templates/` - UI templates
-- `scripts/render_job.sh` - Blender launch wrapper
-- `config.json` - Runtime config
-
-## Safety Notes
-- This is intended for LAN use only.
-- There is no authentication/authorization layer by default.
-- Keep firewall/router rules strict.
-
-## Quick Sanity Check
-```bash
-python3 -m py_compile app.py backend/*.py
-```
 
 ## License
 MIT
